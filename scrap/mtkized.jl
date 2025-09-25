@@ -1,4 +1,4 @@
-include("SolutionVol1.2.jl")
+include("model_spec.jl")
 using InfiniteOpt, Ipopt
 
 ### ModelingToolkit
@@ -14,3 +14,4 @@ sol = solve(prob, JuMPCollocation(Ipopt.Optimizer))
 p1 = plot(sol.sol)
 p2 = plot(sol.input_sol)
 plot(p1, p2, layout = (1, 2))
+savefig("fig2.png")

@@ -3,9 +3,7 @@ using OrdinaryDiffEq
 using DataInterpolations
 using Symbolics
 using ModelingToolkit
-import CasADi
 using LinearAlgebra
-using Optim
 using Plots
 import Symbolics: derivative
 
@@ -16,7 +14,7 @@ const Kd = 24.7
 
 t = ModelingToolkit.t_nounits
 @variables α(t) Cp(t) αCp(t) CppC(t) RNA(..)
-@variables V(t) [input = true, bounds = (0.1, 10.)]
+@variables V(t) [input = true, bounds = (1., 5.)]
 @variables λ₁ λ₂ λ₃ λ₄ λ₅
 
 const ∂ = Symbolics.derivative
@@ -99,7 +97,6 @@ function below_tol(sol, sol_prev; tol = 1e-4)
     for (i, t) in enumerate(tsteps)
         err += norm(sol(t) - sol_prev(t))
     end
-    @show err
     err < tol
 end
 
@@ -107,3 +104,27 @@ function construct_controller(x, λ)
     u_vals = [optimal_V(x(t), λ(t)) for t in x.t]
     ConstantInterpolation(u_vals, x.t; extrapolation = ExtrapolationType.Extension)
 end
+
+#### Oscillating
+function osc!(du, u, p, t)
+    state_dynamics!(du, u, V_osc(t))
+end
+
+V_osc(t) = 50.5 + 49.5sin(2*π*t)
+n0 = [0., 0., 1., 0., 0.]
+tspan = (0., 100.)
+
+# --- ODE system with constant V=10 ---
+ode_func_hi!(dy, y, p, t) = state_dynamics!(dy, y, 100)
+prob_hi = ODEProblem(ode_func_hi!, n0, tspan)
+sol_hi = solve(prob_hi, Rodas5P())
+ode_func_low!(dy, y, p, t) = state_dynamics!(dy, y, 1.0)
+prob_low = ODEProblem(ode_func_low!, n0, tspan)
+sol_low = solve(prob_low, Rodas5P())
+
+prob_osc = ODEProblem(osc!, n0, tspan)  
+sol_osc = solve(prob_osc, Rodas5P())
+
+plot(sol_osc, idxs = 5; label = "Oscillating")
+plot!(sol_low, idxs = 5; label = "Low")
+plot!(sol_hi, idxs = 5; label = "High")

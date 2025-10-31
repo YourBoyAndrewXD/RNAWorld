@@ -1,21 +1,27 @@
-using ForwardDiff
-using OrdinaryDiffEq
+using OrdinaryDiffEqRosenbrock
 using DataInterpolations
 using Symbolics
 using ModelingToolkit
 using LinearAlgebra
 using Plots
+using Optim
 import Symbolics: derivative
 
 # Constants
-k1, k2, k3, k4, k5 = 4.55e-3, 0.183, 0.167, 0.1, 3.33e-3
-const c6 = 1.06
-const Kd = 24.7
-
 t = ModelingToolkit.t_nounits
 @variables α(t) Cp(t) αCp(t) CppC(t) RNA(..)
-@variables V(t) [input = true, bounds = (1., 5.)]
+@variables V(t) [input = true, bounds = (0.1, 10.)]
 @variables λ₁ λ₂ λ₃ λ₄ λ₅
+@parameters begin
+    k1 = 4.55e-3
+    k2 = 0.183
+    k3 = 0.167
+    k4 = 0.1
+    k5 = 3.33e-3
+end
+
+const c6 = 1.06
+const Kd = 24.7
 
 const ∂ = Symbolics.derivative
 const r1 = k1*αCp^2 / V^2
@@ -24,6 +30,7 @@ const r3 = k3*CppC / V
 const r4 = k4*α*Cp / V^2
 const r5 = k5*αCp / V
 const r6 = c6 * (1 + (Cp + αCp) / (Kd * V)) * CppC / V
+const r7 = k6*RNA
 
 const H = V * (
         λ₁ * (r1 + r5 - r2 - r4) +
@@ -37,15 +44,16 @@ const nₜ = [∂(H, λ₁), ∂(H, λ₂), ∂(H, λ₃), ∂(H, λ₄), ∂(H,
 
 λ = [λ₁, λ₂, λ₃, λ₄, λ₅]
 n = [α, Cp, αCp, CppC, RNA(t)]
+k = [k1, k2, k3, k4, k5]
 
-Hamiltonian = Symbolics.build_function(H, n, λ, V; expression = Val{false})
-adjoint_dynamics, adjoint_dynamics! = Symbolics.build_function(λₜ, n, λ, V; expression = Val{false})
-state_dynamics, state_dynamics! = Symbolics.build_function(nₜ, n, V; expression = Val{false})
+Hamiltonian = Symbolics.build_function(H, n, λ, k, V; expression = Val{false})
+adjoint_dynamics, adjoint_dynamics! = Symbolics.build_function(λₜ, n, λ, k, V; expression = Val{false})
+state_dynamics, state_dynamics! = Symbolics.build_function(nₜ, n, k, V; expression = Val{false})
 
 # Optimal V(t) maximizes H(n, λ, V)
-function optimal_V(n, λ)
-    obj(V) = -Hamiltonian(n, λ, V)  # negative for maximization
-    result = optimize(obj, 1.0, 100.0)
+function optimal_V(n, k, λ)
+    obj(V) = -Hamiltonian(n, λ, k, V)  # negative for maximization
+    result = Optim.optimize(obj, 0.1, 10.0)
     return Optim.minimizer(result)
 end
 
@@ -53,33 +61,32 @@ end
 ### Solve Pontryagin Maximum Principle ###
 ##########################################
 
-function ForwardBackwardSweep(init_controller, solver, x0, λ0, tspan; tol = 1e-5, maxiters = 1000)
+function ForwardBackwardSweep(init_controller, solver, x0, λ0, ks, tspan; tol = 1e-5, maxiters = 1000)
     # x_i, λ_i, u_i 
     # x_{i+1}, λ_{i+1}, u_{i+1}
     
     uᵢ = init_controller
     function state!(du, u, p, t)
-        state_dynamics!(du, u, uᵢ(t))
+        state_dynamics!(du, u, ks, uᵢ(t))
     end
     prob_fwd = ODEProblem(state!, x0, tspan)
     xᵢ = solve(prob_fwd, solver; dtmax = 1.)
 
     function costate!(dλ, λ, p, t)
-        adjoint_dynamics!(dλ, xᵢ(t), λ, uᵢ(t))
+        adjoint_dynamics!(dλ, xᵢ(t), λ, ks, uᵢ(t))
     end
     prob_bwd = ODEProblem(costate!, λ0, (tspan[2], tspan[1]))
     λᵢ = solve(prob_bwd, solver; dtmax = 1.)
-    uᵢ = construct_controller(xᵢ, λᵢ)
+    uᵢ = construct_controller(xᵢ, ks, λᵢ)
 
     for sweep in 1:maxiters
-        println("Sweep $sweep")
         x_prev = xᵢ
         λ_prev = λᵢ
         u_prev = uᵢ
 
         xᵢ = solve(prob_fwd, solver; dtmax = 1.)
         λᵢ = solve(prob_bwd, solver; dtmax = 1.)
-        uᵢ = construct_controller(xᵢ, λᵢ)
+        uᵢ = construct_controller(xᵢ, ks, λᵢ)
 
         below_tol(xᵢ, x_prev; tol) && below_tol(λᵢ, λ_prev; tol) && below_tol(uᵢ, u_prev; tol) && break
     end
@@ -100,31 +107,7 @@ function below_tol(sol, sol_prev; tol = 1e-4)
     err < tol
 end
 
-function construct_controller(x, λ)
-    u_vals = [optimal_V(x(t), λ(t)) for t in x.t]
+function construct_controller(x, k, λ)
+    u_vals = [optimal_V(x(t), k, λ(t)) for t in x.t]
     ConstantInterpolation(u_vals, x.t; extrapolation = ExtrapolationType.Extension)
 end
-
-#### Oscillating
-function osc!(du, u, p, t)
-    state_dynamics!(du, u, V_osc(t))
-end
-
-V_osc(t) = 50.5 + 49.5sin(2*π*t)
-n0 = [0., 0., 1., 0., 0.]
-tspan = (0., 100.)
-
-# --- ODE system with constant V=10 ---
-ode_func_hi!(dy, y, p, t) = state_dynamics!(dy, y, 100)
-prob_hi = ODEProblem(ode_func_hi!, n0, tspan)
-sol_hi = solve(prob_hi, Rodas5P())
-ode_func_low!(dy, y, p, t) = state_dynamics!(dy, y, 1.0)
-prob_low = ODEProblem(ode_func_low!, n0, tspan)
-sol_low = solve(prob_low, Rodas5P())
-
-prob_osc = ODEProblem(osc!, n0, tspan)  
-sol_osc = solve(prob_osc, Rodas5P())
-
-plot(sol_osc, idxs = 5; label = "Oscillating")
-plot!(sol_low, idxs = 5; label = "Low")
-plot!(sol_hi, idxs = 5; label = "High")

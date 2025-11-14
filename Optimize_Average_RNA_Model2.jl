@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # ==========================================
 # File: Optimize_Average_RNA_Model.jl
 # Goal: Optimize control V(t) to maximize RNA Average (fast, stable version)
@@ -14,8 +13,8 @@ using Plots
 const eps_div = 1e-9
 Vmin, Vmax = 0.1, 100.0
 tspan = (0.0, 100.0)
-n0 = [50.0, 500.0, 50.0, 5.0, 0.0]          # [α, Cp, αCp, CppC, RNA]
-params = (0.251188643150958, 1.0, 0.5011872336272722, 0.15848931924611134, 0.025118864315095794, 2.51188643150958, 0.7943282347242815, 0.025118864315095794)  # (k1,k2,k3,k4,k5,c6,Kd,D1)
+n0 = [100.0, 500.0, 100.0, 100.0, 0.0]          # [α, Cp, αCp, CppC, RNA]
+params = (3.9810717055349722, 1.2589254117941673, 2.51188643150958, 10.0, 10.0, 0.251188643150958, 0.31622776601683794, 0.00630957344480193)  # (k1,k2,k3,k4,k5,c6,Kd,D1)
 
 # -------------------------
 # Reaction Model
@@ -176,13 +175,13 @@ end
 function random_parameters()
     return (
         10.0^(rand(-1.0:0.1:1.0)),  # k1
-        10.0^(rand(-2.0:0.1:0.0)),  # k2
-        10.0^(rand(-2.0:0.1:0.0)),  # k3
+        10.0^(rand(-2.0:0.1:1.0)),  # k2
+        10.0^(rand(-2.0:0.1:1.0)),  # k3
         10.0^(rand(-1.0:0.1:1.0)),  # k4
-        10.0^(rand(-2.0:0.1:0.0)),  # k5
-        10.0^(rand(-1.0:0.1:0.7)),  # c6
+        10.0^(rand(-2.0:0.1:1.0)),  # k5
+        10.0^(rand(-1.0:0.1:1.5)),  # c6
         10.0^(rand(-1.0:0.1:1.0)),  # Kd
-        10.0^(rand(-3.0:0.1:-0.3))  # D1
+        10.0^(rand(-3.0:0.1:3))  # D1
     )
 end
 
@@ -198,8 +197,8 @@ function simulate_constant(params, n0, tspan, Vconst)
 end
 
 # --- Run for Vmin and Vmax ---
-sol_min = simulate_constant(params, n0, tspan, Vmin)
-sol_max = simulate_constant(params, n0, tspan, Vmax)
+sol_min = simulate_constant(params, n0, tspan, Vmin; saveat=tsteps)
+sol_max = simulate_constant(params, n0, tspan, Vmax; saveat=tsteps)
 
 # --- Extract RNA (5th variable) ---
 RNA_min = getindex.(sol_min.u, 5)
@@ -209,11 +208,12 @@ RNA_max = getindex.(sol_max.u, 5)
 avg_min = trapz(sol_min.t, RNA_min) / (sol_min.t[end] - sol_min.t[1])
 avg_max = trapz(sol_max.t, RNA_max) / (sol_max.t[end] - sol_max.t[1])
 
+plot(sol_min)
 
 # -------------------------
 # Main Monte Carlo Loop 
 # -------------------------
-n_trials = 11025
+n_trials = 300
 successes = []
 
 # -------------------------
@@ -357,7 +357,6 @@ xlabel!("Time")
 ylabel!("Concentration")
 title!("Species Dynamics under Optimized Sinusoidal V(t)")
 
-=======
 # ==========================================
 # File: Optimize_Average_RNA_Model.jl
 # Goal: Optimize control V(t) to maximize RNA Average (fast, stable version)
@@ -454,34 +453,6 @@ function find_optimal_V(N::Int=25)
     println("✅ Optimization complete. Best mean RNA = ", -result.minimum)
     return result.minimizer
 end
-
-# -------------------------
-# Run Optimization and Plot
-# -------------------------
-Vopt = find_optimal_V(100)  
-sol_opt = simulate(params, n0, tspan, Vopt)
-sol_min = simulate(params, n0, tspan, fill(Vmin, 20))
-sol_max = simulate(params, n0, tspan, fill(Vmax, 20))
-
-tvals = sol_opt.t
-RNA_opt = getindex.(sol_opt.u, 5)
-RNA_min = getindex.(sol_min.u, 5)
-RNA_max = getindex.(sol_max.u, 5)
-
-# Plotting
-tgrid = range(tspan[1], tspan[2], length=length(Vopt))
-p1 = plot(tgrid, Vopt, lw=2, color=:blue, xlabel="Time", ylabel="V(t)",
-          title="Optimized Control Function V(t)", label="Vopt(t)")
-hline!([Vmin], linestyle=:dash, color=:red, label="Vmin")
-hline!([Vmax], linestyle=:dash, color=:green, label="Vmax")
-
-p2 = plot(tvals, RNA_opt, lw=2, color=:blue, label="Vopt(t)",
-          xlabel="Time", ylabel="[RNA]", title="RNA Production vs Time")
-plot!(tvals, RNA_min, lw=2, color=:red, label="Vmin")
-plot!(tvals, RNA_max, lw=2, color=:green, label="Vmax")
-
-plot(p1, p2, layout=(2,1), size=(900,650))
-
 
 # Compute average RNA for each case
 avg_RNA_opt = trapz(sol_opt.t, RNA_opt) / (sol_opt.t[end] - sol_opt.t[1])
@@ -618,7 +589,7 @@ end
 # -------------------------
 # Random parameter search
 # -------------------------
-n_trials = 10  # number of random parameter sets
+n_trials = 5  # number of random parameter sets
 successes = []
 
 for i in 1:n_trials
@@ -661,4 +632,121 @@ for s in successes
     println(s)
 end
 # -------------------------
->>>>>>> ed8c9783785eaeb6248bc9506a046f52a4f90e9d
+
+
+
+
+
+
+
+
+
+
+
+# ================================
+# 📊 RNA(t) Comparison Plot
+# ================================
+
+# Extract RNA trajectories
+sol_sig = simulate_sinusoidal(params, n0, tspan, A_opt, ω_opt, ϕ_opt)
+RNA_sig = getindex.(sol_sig.u, 5)
+RNA_min = getindex.(sol_min.u, 5)
+RNA_max = getindex.(sol_max.u, 5)
+
+# Compute averages
+avg_sig = trapz(sol_sig.t, RNA_sig) / (sol_sig.t[end] - sol_sig.t[1])
+avg_min = trapz(sol_min.t, RNA_min) / (sol_min.t[end] - sol_min.t[1])
+avg_max = trapz(sol_max.t, RNA_max) / (sol_max.t[end] - sol_max.t[1])
+
+# Plot all three curves
+plt = plot(sol_sig.t, RNA_sig, lw=3, color=:blue, label="Vsig (Optimized Sinusoidal)")
+plot!(sol_min.t, RNA_min, lw=2, color=:red, linestyle=:dash, label="Vmin (Constant)")
+plot!(sol_max.t, RNA_max, lw=2, color=:green, linestyle=:dot, label="Vmax (Constant)")
+
+xlabel!("Time")
+ylabel!("[RNA]")
+title!("RNA Production: Vsig vs Vmin vs Vmax")
+
+# Add annotations for average values
+annotate!(maximum(sol_sig.t)*0.6, maximum(RNA_sig)*0.9,
+    text("⟨RNA⟩ Vsig = $(round(avg_sig, digits=2))", :blue, 10))
+annotate!(maximum(sol_sig.t)*0.6, maximum(RNA_sig)*0.8,
+    text("⟨RNA⟩ Vmin = $(round(avg_min, digits=2))", :red, 10))
+annotate!(maximum(sol_sig.t)*0.6, maximum(RNA_sig)*0.7,
+    text("⟨RNA⟩ Vmax = $(round(avg_max, digits=2))", :green, 10))
+
+display(plt)
+
+# Also print summary to console
+println("\n--- Average RNA Comparison ---")
+println("Vsig (Optimized): ", avg_sig)
+println("Vmin (Constant): ", avg_min)
+println("Vmax (Constant): ", avg_max)
+
+
+
+# -------------------------
+# Optimization for A, ω, ϕ
+# -------------------------
+function find_optimal_sinusoidal(params)
+    k1,k2,k3,k4,k5,c6,Kd,D1 = params
+    println("🔹 Optimizing sinusoidal control V(t) = mean + A*sin(ωt + ϕ)...")
+    println("🔸 Using kinetic parameters:")
+    println("    k1 = $k1,  k2 = $k2,  k3 = $k3")
+    println("    k4 = $k4,  k5 = $k5,  c6 = $c6")
+    println("    Kd = $Kd,  D1 = $D1")
+    println()
+
+    obj(x) = begin
+        A, ω, ϕ = x
+        sol = simulate_sinusoidal(params, n0, tspan, A, ω, ϕ)
+        if sol.retcode != :Success
+            return 1e6
+        end
+        RNA_vals = getindex.(sol.u, 5)
+        avg_RNA = trapz(sol.t, RNA_vals) / (sol.t[end] - sol.t[1])
+        return -avg_RNA
+    end
+
+    lower = [0.0, 0.01, 0.0]
+    upper = [(Vmax - Vmin)/2, 1.0, 2π]
+    x0 = [10.0, 0.1, 0.0]
+
+    result = optimize(obj, lower, upper, x0,
+                      Fminbox(NelderMead()),
+                      Optim.Options(iterations=800, show_trace=true))
+
+    println("\n✅ Optimization complete.")
+    println("Best sinusoidal parameters:")
+    println("    A = $(result.minimizer[1])")
+    println("    ω = $(result.minimizer[2])")
+    println("    ϕ = $(result.minimizer[3])")
+    println("Mean RNA (maximized) = ", -result.minimum)
+    println("\n📊 Corresponding kinetic parameters:")
+    println("    k1 = $k1, k2 = $k2, k3 = $k3, k4 = $k4, k5 = $k5, c6 = $c6, Kd = $Kd, D1 = $D1")
+
+    return result.minimizer
+end
+# -------------------------
+# Run the optimization
+# -------------------------
+opt_params = find_optimal_sinusoidal(params)
+A_opt, ω_opt, ϕ_opt = opt_params
+
+# -------------------------
+# Plot optimized V(t)
+# -------------------------
+tvals = range(tspan[1], tspan[2], length=300)
+Vsig = [sinusoidal_V(t, A_opt, ω_opt, ϕ_opt) for t in tvals]
+plot(tvals, Vsig, lw=2, color=:blue, xlabel="Time", ylabel="V(t)",
+     title="Optimized Sinusoidal Control V(t)", label="V(t)")
+hline!([Vmin], linestyle=:dash, color=:red, label="Vmin")
+hline!([Vmax], linestyle=:dash, color=:green, label="Vmax")
+
+# -------------------------
+# Plot resulting RNA profile
+# -------------------------
+sol_sin = simulate_sinusoidal(params, n0, tspan, A_opt, ω_opt, ϕ_opt)
+RNA_sin = getindex.(sol_sin.u, 5)
+plot(sol_sin.t, RNA_sin, lw=2, xlabel="Time", ylabel="[RNA]",
+     title="RNA Production (Optimized Sinusoidal Control)", color=:blue)
